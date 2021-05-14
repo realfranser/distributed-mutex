@@ -18,7 +18,6 @@
 
 /* Include my libs */
 #include "clock.h"
-#include "actions.h"
 #include "hashmap.h"
 
 /* My consts */
@@ -337,22 +336,18 @@ int main(int argc, char *argv[])
 -----------------------------------------------------------------------------*/
     default:
       /* Check for messageto, lock and unlock */
-      token = get_token(action);
-
-      switch (token)
+      if (!strcmp(action, "MESSAGETO"))
       {
-      case 'M':
-        /* Action: MESSAGETO */
         tick(logic_clock->lc, process_id, process_name);
         /* Enviar mensaje */
-        break;
+      }
 
-      case 'L':
-        /* Action: LOCK */
-        /* Get section name */
-        char *selected_critical_section;
-        selected_critical_section = malloc(strlen(section));
-        strcpy(selected_critical_section, section);
+      /* Get section name */
+      char *selected_critical_section = malloc(strlen(section));
+      strcpy(selected_critical_section, section);
+
+      if (!strcmp(action, "LOCK"))
+      {
         /* Get existing section or create it otherwise */
         struct mutex *mtx;
         mtx = hashmap_get(critical_section, &(struct mutex){.name = selected_critical_section});
@@ -364,15 +359,10 @@ int main(int argc, char *argv[])
           break; */
         }
         /* Solicitar mutex existente */
-        break;
+      }
 
-      case 'U':
-        /* Action: UNLOCK */
-        /* Get section name */
-        char *selected_critical_section;
-        selected_critical_section = malloc(strlen(section));
-        strcpy(selected_critical_section, section);
-
+      if (!strcmp(action, "UNLOCK"))
+      {
         /* TODO: enviar mensaje */
 
         /* Get existing section or create it otherwise */
@@ -381,10 +371,6 @@ int main(int argc, char *argv[])
 
         mtx->req_id = (int *)malloc(sizeof(int));
         mtx->mutex = 0;
-        break;
-
-      default:
-        /* invalid token */
       }
     }
   }
@@ -542,7 +528,7 @@ int send_unlock(char *name_param)
   mtx = hashmap_get(critical_section, &(struct mutex){.name = name_param});
   if (!mtx)
   {
-    prinft("send_unlock: error en la obtencion del mutex");
+    printf("send_unlock: error en la obtencion del mutex");
     return -1;
   }
 
