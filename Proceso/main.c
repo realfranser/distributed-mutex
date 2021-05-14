@@ -25,6 +25,7 @@
 #define MSG 0
 #define LOCK 1
 #define OK 2
+#define OFFSET 2
 
 int puerto_udp;
 
@@ -41,7 +42,7 @@ struct mutex
 
 struct process
 {
-  int puerto;
+  int puerto, id;
   char *name, *dir;
 };
 
@@ -92,7 +93,7 @@ struct clock *logic_clock;
 
 int process_id, num_proc;
 
-char *process_name;
+char *process_name, *buffer;
 
 int main(int argc, char *argv[])
 {
@@ -149,10 +150,6 @@ int main(int argc, char *argv[])
   puerto_udp = dir.sin_port;
   fprintf(stdout, "%s: %d\n", argv[1], puerto_udp);
 
-  /* Guardamos el nombre y la direccion */
-  address = inet_ntoa(dir.sin_addr);
-  process_name = argv[1];
-
   /* En caso de que el hashmap de procesos no exista, lo creamos */
   if (!map)
   {
@@ -165,6 +162,10 @@ int main(int argc, char *argv[])
     critical_section = hashmap_new(sizeof(struct mutex),
                                    0, 0, 0, mutex_hash, mutex_compare, NULL);
   }
+
+  /* Guardamos el nombre y la direccion */
+  address = inet_ntoa(dir.sin_addr);
+  process_name = argv[1];
 
   for (; fgets(line, 80, stdin);)
   {
@@ -189,6 +190,8 @@ int main(int argc, char *argv[])
     /* Declarar nombre del proceso */
     new_process->name = (char *)malloc(strlen(process_name));
     strcpy(new_process->name, process_name);
+    /* Declarar el id del proceso */
+    new_process->id = process_id;
 
     /* Insertar el proceso en al hashmap */
     if (hashmap_set(map, new_process) == NULL)
@@ -210,8 +213,11 @@ int main(int argc, char *argv[])
   /* Procesar Acciones */
   for (; fgets(line, 80, stdin);)
   {
-    char action[80], section[80], buffer[80];
+    char action[80], section[80];
     char *client_name;
+    sscanf(line, "%s %s", action, section);
+
+    buffer = (char *)malloc((sizeof(int) * (num_proc + OFFSET)) + strlen(section));
 
     token = get_token(line);
 
@@ -259,7 +265,6 @@ int main(int argc, char *argv[])
 
       /* Receive the incomming clock via message and compare to this clock */
       struct clock *in_clock;
-      int offset = 2;
       int i;
       int in_id = buffer[1];
 
@@ -267,7 +272,7 @@ int main(int argc, char *argv[])
       in_clock->lc = malloc(num_proc * sizeof(int));
 
       for (i = 0; i < num_proc; i++)
-        in_clock->lc[i] = buffer[i + offset];
+        in_clock->lc[i] = buffer[i + OFFSET];
 
       /* Returns 1 if the process has priority over incomming process */
       int allowed = incoming_clock(logic_clock->lc, in_clock->lc, num_proc, process_id, in_id);
@@ -275,8 +280,8 @@ int main(int argc, char *argv[])
       /* Gets the selected mutex */
       struct mutex *mtx;
       char *msg_name;
-      msg_name = malloc(strlen(&buffer[num_proc + offset]));
-      strcpy(msg_name, &buffer[num_proc + offset]);
+      msg_name = malloc(strlen(&buffer[num_proc + OFFSET]));
+      strcpy(msg_name, &buffer[num_proc + OFFSET]);
 
       mtx = hashmap_get(critical_section, &(struct mutex){.name = msg_name});
 
@@ -332,7 +337,6 @@ int main(int argc, char *argv[])
 -----------------------------------------------------------------------------*/
     default:
       /* Check for messageto, lock and unlock */
-      sscanf(line, "%s %s", action, section);
       token = get_token(action);
 
       switch (token)
@@ -383,6 +387,199 @@ int main(int argc, char *argv[])
         /* invalid token */
       }
     }
+  }
+
+  return 0;
+}
+
+/*
+ █████╗ ██╗   ██╗██╗  ██╗██╗██╗     ██╗ █████╗ ██████╗ 
+██╔══██╗██║   ██║╚██╗██╔╝██║██║     ██║██╔══██╗██╔══██╗
+███████║██║   ██║ ╚███╔╝ ██║██║     ██║███████║██████╔╝
+██╔══██║██║   ██║ ██╔██╗ ██║██║     ██║██╔══██║██╔══██╗
+██║  ██║╚██████╔╝██╔╝ ██╗██║███████╗██║██║  ██║██║  ██║
+╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝╚══════╝╚═╝╚═╝  ╚═╝╚═╝  ╚═╝
+*/
+
+/* Send message functions */
+
+int send_message(char *name_param)
+{
+  int i;
+  struct process *send_message_process;
+  /* Define the client address */
+  struct sockaddr_in client_addr;
+
+  client_addr.sin_addr.s_addr = INADDR_ANY;
+  client_addr.sin_family = AF_INET;
+
+  /* Set up the type of action to be sent */
+  buffer[0] = MSG;
+
+  /* Get the process and set up the port */
+  send_message_process = hashmap_get(map, &(struct process){.name = name_param});
+  if (!send_message_process)
+  {
+    printf("send_message: process \'%s\' not found\n", name_param);
+    return -1;
+  }
+  client_addr.sin_port = send_message_process->puerto;
+
+  /* Set up the process id */
+  buffer[1] = process_id;
+
+  /* Set up the logic clock */
+  for (i = 0; i < num_proc; i++)
+    buffer[i + OFFSET] = logic_clock->lc[i];
+
+  /* Send message: (tipe of action, process_id and logic clock) to client */
+  if (sendto(puerto_udp, buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0)
+  {
+    printf("send_message: error en sendto\n");
+    close(puerto_udp);
+    return -1;
+  }
+
+  printf("%s: SEND(MSG,%S)\n", process_name, name_param);
+  return 0;
+}
+
+int send_lock(char *name_param)
+{
+  int i;
+  struct process *send_lock_process;
+  /* Define the client address */
+  struct sockaddr_in client_addr;
+
+  client_addr.sin_addr.s_addr = INADDR_ANY;
+  client_addr.sin_family = AF_INET;
+
+  /* Set up the type of action to be sent */
+  buffer[0] = LOCK;
+  buffer[1] = process_id;
+
+  /* Send lock to all messages */
+  for (i = 0; i < num_proc; i++)
+  {
+    if (i != process_id)
+    {
+      /* Get the port of the client process */
+      send_lock_process = hashmap_get(map, &(struct process){.id = i});
+      if (!send_lock_process)
+      {
+        printf("send_lock: process \'%d\' not found\n", i);
+        return -1;
+      }
+      client_addr.sin_port = send_lock_process->puerto;
+
+      /* Store the name of the sender process */
+      strcpy(&buffer[num_proc + OFFSET], name_param);
+
+      /* Send the lock message to the client process */
+      if (sendto(puerto_udp, buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0)
+      {
+        printf("send_lock: error en sendto\n");
+        close(puerto_udp);
+        return -1;
+      }
+
+      printf("%s: SEND(LOCK,%s)\n", process_name, send_lock_process->name);
+    }
+  }
+
+  return 0;
+}
+
+int send_ok(char *name_param)
+{
+  int i;
+  struct process *send_ok_process;
+  /* Define client address */
+  struct sockaddr_in client_addr;
+
+  client_addr.sin_addr.s_addr = INADDR_ANY;
+  client_addr.sin_family = AF_INET;
+
+  /* Get the client process port */
+  send_ok_process = hashmap_get(map, &(struct process){.id = (int)buffer[1]});
+  if (!send_ok_process)
+  {
+    printf("send_ok: error en la obtencion del cliente\n");
+    return -1;
+  }
+  client_addr.sin_port = send_ok_process->puerto;
+
+  /* Set up the type of action to be sent */
+  buffer[0] = OK;
+  buffer[1] = process_id;
+
+  strcpy(&buffer[num_proc + OFFSET], name_param);
+
+  /* Send ok message to the client */
+  if (sendto(puerto_udp, buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0)
+  {
+    printf("send_ok: error en el sendto\n");
+    close(puerto_udp);
+    return -1;
+  }
+
+  printf("%s: SEND(OK,%s)\n", process_name, send_ok_process->name);
+
+  return 0;
+}
+
+int send_unlock(char *name_param)
+{
+  int i, j, client_id;
+  struct mutex *mtx;
+  struct process *send_unlock_process;
+  struct sockaddr_in client_addr;
+
+  client_addr.sin_addr.s_addr = INADDR_ANY;
+  client_addr.sin_family = AF_INET;
+
+  /* Obtecion de la seccion critica en cuestion */
+  mtx = hashmap_get(critical_section, &(struct mutex){.name = name_param});
+  if (!mtx)
+  {
+    prinft("send_unlock: error en la obtencion del mutex");
+    return -1;
+  }
+
+  for (i = 0; i < mtx->req_num; i++)
+  {
+    /* Get the client with a mutex request */
+    /*
+    -
+    -
+    -
+    REVISAR el .name = client_name */
+    client_id = mtx->req_id[i];
+    send_unlock_process = hashmap_get(map, &(struct process){.id = client_id});
+
+    /* Add one tick to the process */
+    tick(logic_clock->lc, process_id, process_name);
+
+    client_addr.sin_port = send_unlock_process->puerto;
+
+    /* Insert clock to the message */
+    for (j = 0; j < num_proc; j++)
+      memcpy((int *)&buffer[j + OFFSET], (int *)&logic_clock->lc[j], sizeof(int));
+
+    buffer[0] = OK;
+    buffer[1] = process_id;
+
+    strcpy(&buffer[num_proc + OFFSET], process_name);
+
+    /* Send unlock message to client */
+    if (sendto(puerto_udp, buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr, sizeof(client_addr)) < 0)
+    {
+      printf("send_unlock: error en sendto\n");
+      close(puerto_udp);
+      return -1;
+    }
+
+    printf("%s: SEND(OK,%s)\n", process_name, send_unlock_process->name);
   }
 
   return 0;

@@ -59,7 +59,7 @@ void main()
 
     printf("El token es: %c", get_token(buffer));*/
 
-    struct clock *logic_clock;
+    /*struct clock *logic_clock;
     struct clock *in_clock;
 
     logic_clock = malloc(sizeof(struct clock));
@@ -76,7 +76,7 @@ void main()
 
     incoming_clock(logic_clock->lc, in_clock->lc, 2, 1, 2);
 
-    printf("This are the new values: %d, %d\n", logic_clock->lc[0], logic_clock->lc[1]);
+    printf("This are the new values: %d, %d\n", logic_clock->lc[0], logic_clock->lc[1]);*/
 }
 
 char get_token(char *linea)
