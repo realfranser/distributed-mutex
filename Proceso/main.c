@@ -99,8 +99,7 @@ int main(int argc, char *argv[])
   int port, s;
   char line[80], proc[80];
 
-  struct sockaddr_in dir, dir_cliente;
-  int dir_size;
+  struct sockaddr_in dir, dir_cliente, socket_address;
   char *address;
 
   struct process *new_process;
@@ -125,17 +124,19 @@ int main(int argc, char *argv[])
     return 1;
   }
 
-  dir.sin_port = htons(0);
-  dir.sin_addr.s_addr = INADDR_ANY;
-  dir.sin_family = AF_INET;
+  socket_address.sin_port = htons(0);
+  socket_address.sin_addr.s_addr = INADDR_ANY;
+  socket_address.sin_family = AF_INET;
 
   /* Hacemos el bind para obtener direccion y puerto */
-  if (bind(s, (struct sockaddr *)&dir, sizeof(dir)) < 0)
+  if (bind(s, (struct sockaddr *)&socket_address, sizeof(socket_address)) < 0)
   {
     perror("error en bind");
     close(s);
     return 1;
   }
+
+  socklen_t dir_size = sizeof(dir);
 
   /* Obtenemos direccion del puerto y el size del socket address */
   if (getsockname(s, (struct sockaddr *)&dir, (socklen_t *)&dir_size) < 0)
@@ -148,6 +149,7 @@ int main(int argc, char *argv[])
   /* Guardamos el puerto obtenido para este proceso */
   puerto_udp = dir.sin_port;
   fprintf(stdout, "%s: %d\n", argv[1], puerto_udp);
+  fprintf(stdout, "%s: %d\n", argv[1], s);
 
   /* En caso de que el hashmap de procesos no exista, lo creamos */
   if (!map)
@@ -212,6 +214,7 @@ int main(int argc, char *argv[])
   /* Procesar Acciones */
   for (; fgets(line, 80, stdin);)
   {
+    bool finish = 0;
     char action[80], section[80];
     char *client_name;
     sscanf(line, "%s %s", action, section);
@@ -286,35 +289,56 @@ int main(int argc, char *argv[])
 
       if (rec_action == LOCK)
       {
+        int waiting_position;
         /* If mutex doesn't exist, feel free to enter critical section */
         if (!mtx)
         {
           tick(logic_clock->lc, process_id, process_name);
           /* Enviar mensaje */
-          /* Insertar en seccion critica */
+          send_ok(msg_name);
+          /* Creacion de la nueva seccion critica */
+          struct mutex *new_mtx = malloc(sizeof(struct mutex));
+          new_mtx->mutex = 0;
+          new_mtx->req_num = 0;
+          new_mtx->requested = 0;
+          new_mtx->name = (char *)malloc(strlen(msg_name));
+          strcpy(new_mtx->name, msg_name);
+          new_mtx->ok_num = num_proc - 1;
+          new_mtx->req_id = (int *)malloc(sizeof(int));
+          /* Insercion de la nueva seccion critica */
+          hashmap_set(critical_section, new_mtx);
         }
         else
         {
           if (mtx->mutex == 1)
           {
             /* Poner proceso a espera */
+            waiting_position = mtx->req_num;
+            mtx->req_id[waiting_position] = (int)buffer[1];
+            mtx->req_id = (int *)realloc(mtx->req_id, sizeof(int) * (mtx->req_num + 1));
           }
           else if (mtx->requested == 1)
           {
             if (allowed)
             {
+              /* Sumar un evento al reloj logico */
               tick(logic_clock->lc, process_id, process_name);
               /* Enviar mensaje */
+              send_ok(msg_name);
             }
             else
             {
               /* Poner proceso a esperar */
+              waiting_position = mtx->req_num;
+              mtx->req_id[waiting_position] = (int)buffer[1];
+              mtx->req_id = (int *)realloc(mtx->req_id, sizeof(int) * (mtx->req_num + 1));
             }
           }
           else
           {
             tick(logic_clock->lc, process_id, process_name);
             /* Enviar mensaje */
+            send_ok(process_name);
           }
         }
       }
@@ -325,12 +349,16 @@ int main(int argc, char *argv[])
         if (mtx->ok_num == 0)
         {
           /* Hacer mutex */
+          mtx->requested = 0;
+          mtx->mutex = 1;
+          printf("%s: MUTEX(%s)\n", process_name, &buffer[num_proc + OFFSET]);
         }
       }
 
     case 'F':
       /* Action: FINISH */
-      free(buffer);
+      finish = 1;
+      break;
 
       /*-----------------------------------------------------------------------------
 -----------------------------------------------------------------------------*/
@@ -340,6 +368,8 @@ int main(int argc, char *argv[])
       {
         tick(logic_clock->lc, process_id, process_name);
         /* Enviar mensaje */
+        send_message(section);
+        break;
       }
 
       /* Get section name */
@@ -347,29 +377,44 @@ int main(int argc, char *argv[])
       strcpy(selected_critical_section, section);
 
       /* Get existing section or create it otherwise */
-      struct mutex *mtx;
-      mtx = hashmap_get(critical_section, &(struct mutex){.name = selected_critical_section});
+      struct mutex *message_mtx;
+      message_mtx = hashmap_get(critical_section, &(struct mutex){.name = selected_critical_section});
 
       if (!strcmp(action, "LOCK"))
       {
-        if (!mtx)
+        if (!message_mtx)
         {
-          /* TODO: create and add new mutex 
+          /* Creates and adds new mutex to critical section */
           struct mutex *new_mutex = malloc(sizeof(struct mutex));
-          hashmap_set(mtx,)
-          break; */
+          new_mutex->mutex = 0;
+          new_mutex->req_num = 0;
+          new_mutex->requested = 0;
+          new_mutex->name = (char *)malloc(strlen(selected_critical_section));
+          strcpy(new_mutex->name, selected_critical_section);
+          new_mutex->ok_num = num_proc - 1;
+          new_mutex->req_id = (int *)malloc(sizeof(int));
+          hashmap_set(critical_section, new_mutex);
         }
-        /* Solicitar mutex existente */
+        /* Solicitar mutex */
+        struct mutex *request_mtx;
+        request_mtx = hashmap_get(critical_section, &(struct mutex){.name = selected_critical_section});
+        request_mtx->mutex = 1;
+        break;
       }
 
       if (!strcmp(action, "UNLOCK"))
       {
-        /* TODO: enviar mensaje */
-
-        mtx->req_id = (int *)malloc(sizeof(int));
-        mtx->mutex = 0;
+        /* Enviar aviso de unlock */
+        send_unlock(section);
+        /* Unlock mutex in critical section */
+        message_mtx->req_id = (int *)malloc(sizeof(int));
+        message_mtx->mutex = 0;
       }
     }
+
+    if (finish)
+      break;
+    free(buffer);
   }
 
   return 0;
@@ -423,7 +468,7 @@ int send_message(char *name_param)
     return -1;
   }
 
-  printf("%s: SEND(MSG,%S)\n", process_name, name_param);
+  printf("%s: SEND(MSG,%s)\n", process_name, name_param);
   return 0;
 }
 
