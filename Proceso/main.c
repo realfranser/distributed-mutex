@@ -346,11 +346,12 @@ int main(int argc, char *argv[])
       char *selected_critical_section = malloc(strlen(section));
       strcpy(selected_critical_section, section);
 
+      /* Get existing section or create it otherwise */
+      struct mutex *mtx;
+      mtx = hashmap_get(critical_section, &(struct mutex){.name = selected_critical_section});
+
       if (!strcmp(action, "LOCK"))
       {
-        /* Get existing section or create it otherwise */
-        struct mutex *mtx;
-        mtx = hashmap_get(critical_section, &(struct mutex){.name = selected_critical_section});
         if (!mtx)
         {
           /* TODO: create and add new mutex 
@@ -364,10 +365,6 @@ int main(int argc, char *argv[])
       if (!strcmp(action, "UNLOCK"))
       {
         /* TODO: enviar mensaje */
-
-        /* Get existing section or create it otherwise */
-        struct mutex *mtx;
-        mtx = hashmap_get(critical_section, &(struct mutex){.name = selected_critical_section});
 
         mtx->req_id = (int *)malloc(sizeof(int));
         mtx->mutex = 0;
