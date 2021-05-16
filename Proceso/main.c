@@ -151,9 +151,9 @@ int main(int argc, char *argv[])
   {
     int i;
 
-    struct message *msg;
+    struct message msg;
     struct sockaddr_in client_address;
-    struct clock *client_clock;
+    char buffer[80];
 
     sscanf(line, "%s %s", action, proc);
 
@@ -182,9 +182,12 @@ int main(int argc, char *argv[])
         return 1;
       }
 
-      update_clock(logic_clock->lc, msg->clock, num_proc);
+      printf("Este es el puntero mesaje: %p\n", msg);
+      printf("Este es el nombre del mensaje: %s\n", msg.process_name);
 
-      fprintf(stdout, "%s: RECEIVE(MSG,%s)|", process_name, msg->process_name);
+      update_clock(logic_clock->lc, msg.clock, num_proc);
+
+      fprintf(stdout, "%s: RECEIVE(MSG,%s)|", process_name, msg.process_name);
       tick(logic_clock->lc, process_id, process_name, 1);
       break;
 
@@ -195,16 +198,20 @@ int main(int argc, char *argv[])
       /* Get the process with the same name as proc string */
       struct process *message_process = find_process(process_list, proc, num_proc);
 
+      /* Reset address */
+      bzero((char *)&addr, sizeof(addr));
+      addr.sin_family = AF_INET;
+      addr.sin_addr.s_addr = INADDR_ANY;
       /* Allocate memory for the message */
-      msg = malloc(sizeof(struct message));
+      //msg = malloc(sizeof(struct message));
 
       /* Load the message process name */
-      msg->process_name = malloc(strlen(argv[1]));
-      strcpy(msg->process_name, argv[1]);
+      msg.process_name = malloc(strlen(argv[1]));
+      strcpy(msg.process_name, argv[1]);
 
       /* Load the message clock */
-      msg->clock = (int *)malloc(sizeof(logic_clock->lc));
-      load_message_clock(msg->clock, logic_clock->lc, num_proc);
+      msg.clock = (int *)malloc(num_proc * sizeof(int));
+      load_message_clock(msg.clock, logic_clock->lc, num_proc);
 
       /* Load the message client address */
       socklen_t client_size = sizeof(struct sockaddr_in);
@@ -212,6 +219,15 @@ int main(int argc, char *argv[])
       client_address.sin_family = AF_INET;
       client_address.sin_addr.s_addr = INADDR_ANY;
       client_address.sin_port = htons(message_process->puerto);
+
+      /* Check message values */
+      printf("This is the message process name: %s\n", msg.process_name);
+      int x;
+      for (x = 0; x < num_proc; x++)
+      {
+        printf("Clock pos %d, value: %d\n", x, msg.clock[i]);
+      }
+      printf("Puerto destino: %d\n", message_process->puerto);
 
       /* Send message to client */
       if (sendto(s, &msg, sizeof(struct message), 0, (struct sockaddr *)&client_address, client_size) < 0)
