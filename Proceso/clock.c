@@ -3,10 +3,23 @@
 /* Increment the value of the process given by its process descriptor
 located in logic clock, it also prints the tick action with the format:
 process name : action */
-void tick(int *lc, int pd, char *p_name)
+void tick(int *lc, int pd, char *p_name, int print_mode)
 {
     lc[pd]++;
-    printf("%s: TICK\n", p_name);
+    switch (print_mode)
+    {
+    case 0:
+        printf("%s: TICK\n", p_name);
+        break;
+
+    case 1:
+        printf("TICK\n");
+        break;
+
+    default:
+        printf("%s: TICK", p_name);
+        break;
+    }
 }
 
 void init_clock(struct clock *logic_clock, int num_proc)
@@ -16,61 +29,11 @@ void init_clock(struct clock *logic_clock, int num_proc)
         logic_clock->lc[i] = 0;
 }
 
-int incoming_clock(int *my_lc, int *in_lc, int num_proc, int process_id, int in_id)
+void update_clock(int *my_lc, int *client_lc, int num_proc)
 {
-    int i, res, greater = 1;
+    int i;
     for (i = 0; i < num_proc; i++)
-    {
-        if (my_lc[i] < in_lc[i])
-        {
-            greater = 1;
-            break;
-        }
-        if (my_lc[i] > in_lc[i])
-        {
-            greater = 0;
-        }
-    }
-
-    if (greater == 1)
-    {
-        for (i = 0; i < num_proc; i++)
-        {
-            if (my_lc[i] > in_lc[i])
-            {
-                greater = 2;
-                break;
-            }
-            if (my_lc[i] < in_lc[i])
-            {
-                greater = 1;
-            }
-        }
-    }
-
-    switch (greater)
-    {
-    case 0:
-        /* Puede entrar */
-        res = 1;
-    case 1:
-        /* No puede entrar */
-        res = 0;
-    case 2:
-        if (process_id > in_id)
-        {
-            /* Puede entrar */
-            res = 1;
-            break;
-        }
-        /* No puede entrar */
-        res = 0;
-    }
-
-    for (i = 0; i < num_proc; i++)
-        my_lc[i] = my_lc[i] > in_lc[i] ? my_lc[i] : in_lc[i];
-
-    return res;
+        my_lc[i] = my_lc[i] > client_lc[i] ? my_lc[i] : client_lc[i];
 }
 
 void get_clock(int *lc, int num_proc, char *p_name)
@@ -84,4 +47,11 @@ void get_clock(int *lc, int num_proc, char *p_name)
         printf("%d", lc[i]);
     }
     printf("]\n");
+}
+
+void load_message_clock(int *message_clock, int *lc, int num_proc)
+{
+    int i;
+    for (i = 0; i < num_proc; i++)
+        message_clock[i] = lc[i];
 }
