@@ -28,17 +28,19 @@ struct process
 
 struct message
 {
-  char *p_name;
-  int *lc;
+  char p_name[80];
+  int lc[80];
 };
+
+struct process *process_list;
+int num_proc;
 
 int main(int argc, char *argv[])
 {
-  int port, s, i, process_id, num_proc;
+  int port, s, i, process_id;
 
   char line[80], proc[80];
 
-  struct process *process_list;
   char *process_name;
 
   struct sockaddr_in addr;
@@ -85,6 +87,8 @@ int main(int argc, char *argv[])
   puerto_udp = ntohs(addr.sin_port);
   fprintf(stdout, "%s: %d\n", argv[1], puerto_udp);
 
+  process_list = (struct process *)malloc(sizeof(struct process));
+
   for (; fgets(line, 80, stdin);)
   {
     if (!strcmp(line, "START\n"))
@@ -92,13 +96,10 @@ int main(int argc, char *argv[])
 
     sscanf(line, "%[^:]: %d", proc, &port);
 
-    strcpy(process_list[num_proc].name, proc);
-    process_list[num_proc].port = port;
-
     if (!strcmp(proc, argv[1]))
       process_id = num_proc;
 
-    num_proc++;
+    insert_process(port, proc);
   }
 
   char action[80];
@@ -138,17 +139,19 @@ int main(int argc, char *argv[])
       break;
     }
 
-    struct message message;
+    struct message msg;
     struct sockaddr_in client_addr;
     int client_clock[num_proc];
     int k = 0;
     if (!strcmp(action, "RECEIVE"))
     {
-      recv(s, &message, sizeof(struct message), 0);
+
+      recv(s, &msg, sizeof(struct message), 0);
+
       int o = 0;
       while (o < num_proc)
       {
-        client_clock[o] = message.lc[o];
+        client_clock[o] = msg.lc[o];
         o++;
       }
       logic_clock[process_id]++;
@@ -163,12 +166,14 @@ int main(int argc, char *argv[])
         }
         k++;
       }
-      fprintf(stdout, "%s: RECEIVE(MSG,%s)|TICK\n", process_list[process_id].name, message.p_name);
+
+      fprintf(stdout, "%s: RECEIVE(MSG,%s)|TICK\n", process_list[process_id].name, msg.p_name);
     }
 
     if (!strcmp(action, "MESSAGETO"))
     {
       logic_clock[process_id]++;
+
       fprintf(stdout, "%s: ", process_list[process_id].name);
       int m = 0;
       int npuerto = port;
@@ -188,16 +193,18 @@ int main(int argc, char *argv[])
       int t = 0;
       while (t < num_proc)
       {
-        message.lc[t] = logic_clock[t];
+        msg.lc[t] = logic_clock[t];
         t++;
       }
-      strcpy(message.p_name, argv[1]);
+
+      strcpy(msg.p_name, process_name);
+
       client_addr.sin_family = AF_INET;
       client_addr.sin_addr.s_addr = INADDR_ANY;
       client_addr.sin_port = htons(npuerto);
       socklen_t tam_dir = sizeof(struct sockaddr_in);
 
-      sendto(s, &message, sizeof(struct message), 0, (struct sockaddr *)&client_addr, addr_len);
+      sendto(s, &msg, sizeof(struct message), 0, (struct sockaddr *)&client_addr, addr_len);
       fprintf(stdout, "TICK|SEND(MSG,%s)\n", proc);
     }
   }
@@ -213,5 +220,7 @@ int insert_process(int port, char *name)
   new_process.name = (char *)malloc(strlen(name));
   strcpy(new_process.name, name);
 
-  process
+  process_list[num_proc++] = new_process;
+
+  process_list = (struct process *)realloc(process_list, (num_proc + 1) * sizeof(struct process));
 }
