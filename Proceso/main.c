@@ -18,7 +18,7 @@
 
 /* Include my libs */
 #include "clock.h"
-#include "hashmap.h"
+// NOTE: hashmap library not compatible with @triqui
 
 /* My consts */
 #define MSG 0
@@ -43,36 +43,18 @@ struct process
   char *name;
 };
 
-/* Process HashMap methods */
-
-int process_compare(const void *a, const void *b, void *pdata)
-{
-  const struct process *pa = a;
-  const struct process *pb = b;
-  return strcmp(pa->name, pb->name);
-}
-
-bool process_iter(const void *item, void *pdata)
-{
-  const struct process *p = item;
-  printf("%s (puterto=%d)\n", p->name, p->puerto);
-  return true;
-}
-
-uint64_t process_hash(const void *item, uint64_t seed0, uint64_t seed1)
-{
-  const struct process *p = item;
-  return hashmap_sip(p->name, strlen(p->name), seed0, seed1);
-}
-
 /* My global variables */
 
-int process_id;
+int process_id, num_proc;
 
 char *process_name;
 
+struct process *process_list;
+
 /* Auxiliar functions */
 char get_token(char *line);
+struct process *find_process(struct process *process_list, char proc[80], int num_proc);
+int insert_process(int port, char *name);
 
 /* Main function */
 int main(int argc, char *argv[])
@@ -81,8 +63,6 @@ int main(int argc, char *argv[])
   char line[80], proc[80];
 
   struct clock *logic_clock;
-  struct hashmap *process_map;
-  struct process *new_process;
 
   struct sockaddr_in addr;
   socklen_t addr_len;
@@ -134,14 +114,11 @@ int main(int argc, char *argv[])
   fprintf(stdout, "%s: %d\n", argv[1], puerto_udp);
 
   /* Guardamos el nombre y la direccion del proceso */
-  //address = inet_ntoa(addr.sin_addr);
   process_name = argv[1];
 
-  if (!process_map)
-  {
-    process_map = hashmap_new(sizeof(struct process),
-                              0, 0, 0, process_hash, process_compare, NULL);
-  }
+  /* Inicializamos la lista de procesos */
+  process_list = (struct process *)malloc(sizeof(struct process));
+
   for (; fgets(line, 80, stdin);)
   {
     if (!strcmp(line, "START\n"))
@@ -150,23 +127,12 @@ int main(int argc, char *argv[])
     sscanf(line, "%[^:]: %d", proc, &port);
 
     if (!strcmp(proc, argv[1]))
-      process_id = hashmap_count(process_map);
+      process_id = num_proc;
 
-    /* Creacion del nuevo proceso */
-    new_process = malloc(sizeof(struct process));
-    /* Declarar puerto */
-    new_process->puerto = port;
-    /* Declarar address 
-      new_process->dir = (char *)malloc(strlen(proc));
-      strcpy(new_process->dir, proc);*/
-    /* Declarar nombre del proceso */
-    new_process->name = (char *)malloc(strlen(proc));
-    strcpy(new_process->name, proc);
-
-    hashmap_set(process_map, new_process);
+    /* Create and insert the new process in the process list */
+    insert_process(port, proc);
   }
 
-  int num_proc = hashmap_count(process_map);
   //printf("num_proc = %d\n", num_proc);
   //hashmap_scan(process_map, process_iter, NULL);
 
@@ -176,7 +142,7 @@ int main(int argc, char *argv[])
   init_clock(logic_clock, num_proc);
 
   char action[80], token;
-  bool finish = 0;
+  int finish = 0;
 
   //hashmap_scan(process_map, process_iter, NULL);
 
@@ -227,7 +193,7 @@ int main(int argc, char *argv[])
       tick(logic_clock->lc, process_id, process_name, 2);
 
       /* Get the process with the same name as proc string */
-      struct process *message_process = hashmap_get(process_map, &(struct process){.name = proc});
+      struct process *message_process = find_process(process_list, proc, num_proc);
 
       /* Allocate memory for the message */
       msg = malloc(sizeof(struct message));
@@ -290,4 +256,38 @@ char get_token(char *line)
     return 'F';
   /* In case non of the defined actions are found, X represents error */
   return 'X';
+}
+
+int insert_process(int puerto, char *name)
+{
+  struct process new_process;
+
+  new_process.puerto = puerto;
+
+  new_process.name = (char *)malloc(strlen(name));
+  strcpy(new_process.name, name);
+  process_list[num_proc++] = new_process;
+
+  process_list = (struct process *)realloc(process_list, (num_proc + 1) * sizeof(struct process));
+  if (process_list == NULL)
+  {
+    fprintf(stderr, "insert_process: error en realloc\n");
+    return 1;
+  }
+
+  return 0;
+}
+
+struct process *find_process(struct process *process_list, char proc[80], int num_proc)
+{
+  int i;
+
+  for (i = 0; i < num_proc; i++)
+  {
+    if (!strcmp(proc, process_list[i].name))
+    {
+      return &process_list[i];
+    }
+  }
+  return;
 }
