@@ -30,7 +30,6 @@
 int puerto_udp;
 
 /* My structs */
-
 struct message
 {
   char process_name[80];
@@ -44,7 +43,6 @@ struct process
 };
 
 /* My global variables */
-
 int process_id, num_proc;
 
 char *process_name;
@@ -53,7 +51,7 @@ struct process *process_list;
 
 /* Auxiliar functions */
 char get_token(char *line);
-struct process *find_process(struct process *process_list, char proc[80], int num_proc);
+struct process find_process(struct process *process_list, char proc[80], int num_proc);
 int insert_process(int port, char *name);
 
 /* Main function */
@@ -66,8 +64,6 @@ int main(int argc, char *argv[])
 
   struct sockaddr_in addr;
   socklen_t addr_len;
-
-  char *address;
 
   if (argc < 2)
   {
@@ -133,9 +129,6 @@ int main(int argc, char *argv[])
     insert_process(port, proc);
   }
 
-  //printf("num_proc = %d\n", num_proc);
-  //hashmap_scan(process_map, process_iter, NULL);
-
   /* Creacion del logic clock */
   logic_clock = malloc(sizeof(struct clock));
   logic_clock->lc = (int *)malloc(num_proc * sizeof(int));
@@ -144,16 +137,11 @@ int main(int argc, char *argv[])
   char action[80], token;
   int finish = 0;
 
-  //hashmap_scan(process_map, process_iter, NULL);
-
   /* TODO: check finish condition here */
   while (fgets(line, 80, stdin))
   {
-    int i;
-
     struct message msg;
     struct sockaddr_in client_address;
-    char buffer[80];
 
     sscanf(line, "%s %s", action, proc);
 
@@ -193,18 +181,15 @@ int main(int argc, char *argv[])
       tick(logic_clock->lc, process_id, process_name, 2);
 
       /* Get the process with the same name as proc string */
-      struct process *message_process = find_process(process_list, proc, num_proc);
+      struct process message_process = find_process(process_list, proc, num_proc);
 
       /* Reset address */
       bzero((char *)&addr, sizeof(addr));
       addr.sin_family = AF_INET;
       addr.sin_addr.s_addr = INADDR_ANY;
-      /* Allocate memory for the message */
-      //msg = malloc(sizeof(struct message));
 
       /* Load the message process name */
       strcpy(msg.process_name, argv[1]);
-
       /* Load the message clock */
       load_message_clock(msg.clock, logic_clock->lc, num_proc);
 
@@ -213,7 +198,7 @@ int main(int argc, char *argv[])
 
       client_address.sin_family = AF_INET;
       client_address.sin_addr.s_addr = INADDR_ANY;
-      client_address.sin_port = htons(message_process->puerto);
+      client_address.sin_port = htons(message_process.puerto);
 
       /* Send message to client */
       if (sendto(s, &msg, sizeof(struct message), 0, (struct sockaddr *)&client_address, client_size) < 0)
@@ -280,16 +265,12 @@ int insert_process(int puerto, char *name)
   return 0;
 }
 
-struct process *find_process(struct process *process_list, char proc[80], int num_proc)
+struct process find_process(struct process *process_list, char proc[80], int num_proc)
 {
   int i;
 
   for (i = 0; i < num_proc; i++)
-  {
     if (!strcmp(proc, process_list[i].name))
-    {
-      return &process_list[i];
-    }
-  }
+      return process_list[i];
   return;
 }
