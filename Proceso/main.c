@@ -2,7 +2,7 @@
  * C�digo de Apoyo
  *
  * ESTE C�DIGO DEBE COMPLETARLO EL ALUMNO:
- *    - Para desarrollar las funciones de mensajes, reloj y
+ *    - Para desarrollar las funciones de mensajes, logic_clock y
  *      gesti�n del bucle de tareas se recomienda la implementaci�n
  *      de las mismas en diferentes ficheros.
  */
@@ -12,62 +12,37 @@
 #include <string.h>
 #include <strings.h>
 
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <unistd.h>
-
-/* Include my libs */
-#include "clock.h"
-// NOTE: hashmap library not compatible with @triqui
-
-/* My consts */
-#define MSG 0
-#define LOCK 1
-#define OK 2
-
-#define OFFSET 2
+#include <string.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 
 int puerto_udp;
 
-/* My structs */
+struct process
+{
+
+  char *name;
+  int port;
+};
 
 struct message
 {
-  char *process_name;
-  int *clock;
+  char *p_name;
+  int *lc;
 };
 
-struct process
-{
-  int puerto;
-  char *name;
-};
-
-/* My global variables */
-
-int process_id, num_proc;
-
-char *process_name;
-
-struct process *process_list;
-
-/* Auxiliar functions */
-char get_token(char *line);
-struct process *find_process(struct process *process_list, char proc[80], int num_proc);
-int insert_process(int port, char *name);
-
-/* Main function */
 int main(int argc, char *argv[])
 {
-  int port, s;
+  int port, s, i, process_id, num_proc;
+
   char line[80], proc[80];
 
-  struct clock *logic_clock;
+  struct process *process_list;
+  char *process_name;
 
   struct sockaddr_in addr;
   socklen_t addr_len;
-
-  char *address;
 
   if (argc < 2)
   {
@@ -75,49 +50,40 @@ int main(int argc, char *argv[])
     return 1;
   }
 
-  /* Establece el modo buffer de entrada/salida a l�nea */
+  // Establece el modo buffer de entrada/salida a linea
   setvbuf(stdout, (char *)malloc(sizeof(char) * 80), _IOLBF, 80);
   setvbuf(stdin, (char *)malloc(sizeof(char) * 80), _IOLBF, 80);
 
-  /* Creacion del socket UDP */
-  if ((s = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
+  if ((s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
   {
-    perror("error creando socket");
+    fprintf(stderr, "Error en la creacion del socket\n");
+    close(s);
     return 1;
   }
 
-  bzero((char *)&addr, sizeof(addr));
-  addr.sin_port = htons(0);
-  addr.sin_addr.s_addr = INADDR_ANY;
   addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = INADDR_ANY;
+  addr.sin_port = htons(0);
 
-  /* Hacemos el bind para obtener direccion y puerto */
-  if (bind(s, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+  if (bind(s, (struct sockaddr *)&addr, sizeof(addr)))
   {
-    perror("error en bind");
+    fprintf(stderr, "Error en el bind\n");
     close(s);
     return 1;
   }
 
   addr_len = sizeof(addr);
-
-  /* Obtenemos direccion del puerto y el size del socket address */
-  if (getsockname(s, (struct sockaddr *)&addr, (socklen_t *)&addr_len) < 0)
+  if (getsockname(s, (struct sockaddr *)&addr, &addr_len) < 0)
   {
-    perror("error en getsockname");
+    fprintf(stderr, "Error en getsockname\n");
     close(s);
     return 1;
   }
 
-  /* Guardamos el puerto obtenido para este proceso */
-  puerto_udp = ntohs(addr.sin_port);
-  fprintf(stdout, "%s: %d\n", argv[1], puerto_udp);
-
-  /* Guardamos el nombre y la direccion del proceso */
   process_name = argv[1];
 
-  /* Inicializamos la lista de procesos */
-  process_list = (struct process *)malloc(sizeof(struct process));
+  puerto_udp = ntohs(addr.sin_port);
+  fprintf(stdout, "%s: %d\n", argv[1], puerto_udp);
 
   for (; fgets(line, 80, stdin);)
   {
@@ -126,184 +92,126 @@ int main(int argc, char *argv[])
 
     sscanf(line, "%[^:]: %d", proc, &port);
 
+    strcpy(process_list[num_proc].name, proc);
+    process_list[num_proc].port = port;
+
     if (!strcmp(proc, argv[1]))
       process_id = num_proc;
 
-    /* Create and insert the new process in the process list */
-    insert_process(port, proc);
+    num_proc++;
   }
 
-  //printf("num_proc = %d\n", num_proc);
-  //hashmap_scan(process_map, process_iter, NULL);
+  char action[80];
+  /* Inicializar logic_clock */
+  int logic_clock[num_proc];
 
-  /* Creacion del logic clock */
-  logic_clock = malloc(sizeof(struct clock));
-  logic_clock->lc = (int *)malloc(num_proc * sizeof(int));
-  init_clock(logic_clock, num_proc);
+  for (i = 0; i < num_proc; i++)
+    logic_clock[i] = 0;
 
-  char action[80], token;
-  int finish = 0;
+  /* Procesar Acciones */
 
-  //hashmap_scan(process_map, process_iter, NULL);
-
-  /* TODO: check finish condition here */
   while (fgets(line, 80, stdin))
   {
-    int i;
-
-    struct message msg;
-    struct sockaddr_in client_address;
-    char buffer[80];
-
     sscanf(line, "%s %s", action, proc);
 
-    token = get_token(action);
-
-    switch (token)
+    if (!strcmp(action, "GETCLOCK"))
     {
-    case 'G':
-      get_clock(logic_clock->lc, num_proc, process_name);
-      break;
+      fprintf(stdout, "%s: ", process_list[process_id].name);
+      fprintf(stdout, "LC[");
 
-    case 'E':
-      tick(logic_clock->lc, process_id, process_name, 0);
-      break;
+      int j = 0;
 
-    case 'F':
-      finish = 1;
-      break;
+      for (j = 0; j < num_proc; j++)
+        fprintf(stdout, "%d,", logic_clock[j]);
 
-    case 'R':
-      /* Receive the message and store it */
-      if (recv(s, &msg, sizeof(struct message), 0) < 0)
-      {
-        perror("error en recv");
-        close(s);
-        return 1;
-      }
+      fprintf(stdout, "%d]\n", logic_clock[num_proc - 1]);
+    }
 
-      printf("Este es el puntero mesaje: %p\n", msg);
-      printf("Este es el nombre del mensaje: %s\n", msg.process_name);
+    if (!strcmp(action, "EVENT"))
+    {
+      logic_clock[process_id]++;
+      fprintf(stdout, "%s: TICK\n", process_list[process_id].name);
+    }
 
-      update_clock(logic_clock->lc, msg.clock, num_proc);
-
-      fprintf(stdout, "%s: RECEIVE(MSG,%s)|", process_name, msg.process_name);
-      tick(logic_clock->lc, process_id, process_name, 1);
-      break;
-
-    case 'M':
-
-      tick(logic_clock->lc, process_id, process_name, 2);
-
-      /* Get the process with the same name as proc string */
-      struct process *message_process = find_process(process_list, proc, num_proc);
-
-      /* Reset address */
-      bzero((char *)&addr, sizeof(addr));
-      addr.sin_family = AF_INET;
-      addr.sin_addr.s_addr = INADDR_ANY;
-      /* Allocate memory for the message */
-      //msg = malloc(sizeof(struct message));
-
-      /* Load the message process name */
-      msg.process_name = malloc(strlen(argv[1]));
-      strcpy(msg.process_name, argv[1]);
-
-      /* Load the message clock */
-      msg.clock = (int *)malloc(num_proc * sizeof(int));
-      load_message_clock(msg.clock, logic_clock->lc, num_proc);
-
-      /* Load the message client address */
-      socklen_t client_size = sizeof(struct sockaddr_in);
-
-      client_address.sin_family = AF_INET;
-      client_address.sin_addr.s_addr = INADDR_ANY;
-      client_address.sin_port = htons(message_process->puerto);
-
-      /* Check message values */
-      printf("This is the message process name: %s\n", msg.process_name);
-      int x;
-      for (x = 0; x < num_proc; x++)
-      {
-        printf("Clock pos %d, value: %d\n", x, msg.clock[i]);
-      }
-      printf("Puerto destino: %d\n", message_process->puerto);
-
-      /* Send message to client */
-      if (sendto(s, &msg, sizeof(struct message), 0, (struct sockaddr *)&client_address, client_size) < 0)
-      {
-        printf("error en sendto\n");
-        close(s);
-        return 1;
-      }
-
-      fprintf(stdout, "|SEND(MSG,%s)\n", proc);
-      break;
-
-    default:
+    if (!strcmp(action, "FINISH"))
+    {
       break;
     }
 
-    /* TODO: check finish condition above */
-    if (finish)
-      break;
-  }
+    struct message message;
+    struct sockaddr_in client_addr;
+    int client_clock[num_proc];
+    int k = 0;
+    if (!strcmp(action, "RECEIVE"))
+    {
+      recv(s, &message, sizeof(struct message), 0);
+      int o = 0;
+      while (o < num_proc)
+      {
+        client_clock[o] = message.lc[o];
+        o++;
+      }
+      logic_clock[process_id]++;
+      while (k < num_proc)
+      {
+        if (k != process_id)
+        {
+          if (client_clock[k] > logic_clock[k])
+          {
+            logic_clock[k] = client_clock[k];
+          }
+        }
+        k++;
+      }
+      fprintf(stdout, "%s: RECEIVE(MSG,%s)|TICK\n", process_list[process_id].name, message.p_name);
+    }
 
+    if (!strcmp(action, "MESSAGETO"))
+    {
+      logic_clock[process_id]++;
+      fprintf(stdout, "%s: ", process_list[process_id].name);
+      int m = 0;
+      int npuerto = port;
+
+      while (m < num_proc)
+      {
+        if (!strcmp(proc, process_list[m].name))
+        {
+          bzero((char *)&addr, sizeof(addr));
+          addr.sin_family = AF_INET;
+          addr.sin_addr.s_addr = INADDR_ANY;
+          npuerto = process_list[m].port;
+        }
+        m++;
+      }
+
+      int t = 0;
+      while (t < num_proc)
+      {
+        message.lc[t] = logic_clock[t];
+        t++;
+      }
+      strcpy(message.p_name, argv[1]);
+      client_addr.sin_family = AF_INET;
+      client_addr.sin_addr.s_addr = INADDR_ANY;
+      client_addr.sin_port = htons(npuerto);
+      socklen_t tam_dir = sizeof(struct sockaddr_in);
+
+      sendto(s, &message, sizeof(struct message), 0, (struct sockaddr *)&client_addr, addr_len);
+      fprintf(stdout, "TICK|SEND(MSG,%s)\n", proc);
+    }
+  }
   return 0;
 }
 
-char get_token(char *line)
-{
-  if (!strcmp(line, "EVENT"))
-    return 'E';
-  if (!strcmp(line, "GETCLOCK"))
-    return 'G';
-  if (!strcmp(line, "MESSAGETO"))
-    return 'M';
-  if (!strcmp(line, "RECEIVE"))
-    return 'R';
-  /* Under development */
-  if (!strcmp(line, "LOCK"))
-    return 'L';
-  /* Under development */
-  if (!strcmp(line, "UNLOCK"))
-    return 'U';
-  if (!strcmp(line, "FINISH"))
-    return 'F';
-  /* In case non of the defined actions are found, X represents error */
-  return 'X';
-}
-
-int insert_process(int puerto, char *name)
+int insert_process(int port, char *name)
 {
   struct process new_process;
 
-  new_process.puerto = puerto;
+  new_process.port = port;
 
   new_process.name = (char *)malloc(strlen(name));
   strcpy(new_process.name, name);
-  process_list[num_proc++] = new_process;
 
-  process_list = (struct process *)realloc(process_list, (num_proc + 1) * sizeof(struct process));
-  if (process_list == NULL)
-  {
-    fprintf(stderr, "insert_process: error en realloc\n");
-    return 1;
-  }
-
-  return 0;
-}
-
-struct process *find_process(struct process *process_list, char proc[80], int num_proc)
-{
-  int i;
-
-  for (i = 0; i < num_proc; i++)
-  {
-    if (!strcmp(proc, process_list[i].name))
-    {
-      return &process_list[i];
-    }
-  }
-  return;
+  process
 }
